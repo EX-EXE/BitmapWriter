@@ -2,6 +2,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace BitmapWriter;
 
@@ -173,6 +174,166 @@ public class BitmapWriter : IDisposable
                 fileStream.Write(dstPaddingBytes);
             }
         }
+    }
+
+
+    public void SavePaletteGrayScaleImage(string path, BitmapColorBit colorBit, BitmapCompression compression)
+    {
+        switch (colorBit)
+        {
+            case BitmapColorBit.Bit1:
+            case BitmapColorBit.Bit4:
+            case BitmapColorBit.Bit8:
+                break;
+            default:
+                throw new ArgumentException($"Compression with this bit depth is not possible.");
+        }
+        switch (compression)
+        {
+            case BitmapCompression.Rgb:
+                break;
+
+            case BitmapCompression.Rle8:
+                if (colorBit != BitmapColorBit.Bit8)
+                {
+                    throw new ArgumentException($"This compression method cannot be used with this bit depth.");
+                }
+                break;
+
+            case BitmapCompression.Rle4:
+                if (colorBit != BitmapColorBit.Bit4)
+                {
+                    throw new ArgumentException($"This compression method cannot be used with this bit depth.");
+                }
+                break;
+
+            default:
+                throw new ArgumentException($"This compression method cannot be used with this bit depth.");
+        }
+
+
+        var paletteList = new List<BitmapPaletteData>();
+        var paletteIndexDict = new Dictionary<int, byte>();
+        byte GetOrAddPalett(byte g, byte b, byte r)
+        {
+            if (paletteList == null || paletteIndexDict == null)
+            {
+                throw new InvalidOperationException("null data.");
+            }
+
+            int num = (r << 16) | (g << 8) | (b << 0);
+            if (paletteIndexDict.TryGetValue(num, out var index))
+            {
+                return index;
+            }
+
+            var data = new BitmapPaletteData(r, g, b);
+            var addIndex = (byte)paletteList.Count;
+            paletteList.Add(data);
+            paletteIndexDict.Add(num, addIndex);
+            return addIndex;
+        }
+        (byte, byte, byte) Convert(ReadOnlySpan<byte> bgr)
+        {
+            if (bgr.Length <= 2)
+            {
+                throw new InvalidOperationException("Length error.");
+            }
+
+            ref readonly var b = ref bgr[0];
+            ref readonly var g = ref bgr[1];
+            ref readonly var r = ref bgr[2];
+            var total = b * 0.0722 + g * 0.7152 + r * 0.2126;
+            var calc = (byte)(total);
+            switch (colorBit)
+            {
+                case BitmapColorBit.Bit1:
+                    return (calc < byte.MaxValue / 2.0) ? ((byte)0, (byte)0, (byte)0) : ((byte)255, (byte)255, (byte)255);
+                case BitmapColorBit.Bit4:
+                    {
+                        calc = (byte)(calc & 0xF0);
+                        return (calc, calc, calc);
+                    }
+                case BitmapColorBit.Bit8:
+                    {
+                        return (calc, calc, calc);
+                    }
+                default:
+                    throw new InvalidOperationException($"Invalid color bit. : {colorBit}");
+            }
+        }
+
+
+        var srcImageSpan = bufferImage.AsSpan();
+        var srcImageWidth = infoHeader.Width * 3;
+        var writeLineByteSize = GetImageWidthSize(infoHeader.Width, colorBit);
+        var writeTotalByteSize = infoHeader.Height * writeLineByteSize;
+        var writeImage = ArrayPool<byte>.Shared.Rent(writeTotalByteSize);
+        try
+        {
+            var writeImageSpan = writeImage.AsSpan(0, writeTotalByteSize);
+            for (var heightIndex = 0; heightIndex < infoHeader.Height; ++heightIndex)
+            {
+                var srcImageIndex = infoHeader.Height - heightIndex - 1;
+                var lineBitIndex = heightIndex * writeLineByteSize * 8;
+                for (var widthIndex = 0; widthIndex < srcImageWidth; widthIndex += 3)
+                {
+                    var lineSpan = srcImageSpan.Slice(widthIndex + srcImageWidth * srcImageIndex, 3);
+                    (byte g, byte b, byte r) = Convert(lineSpan);
+                    var palettIndex = GetOrAddPalett(g, b, r);
+
+                    var writeByteIndex = lineBitIndex / 8;
+                    var writeBitIndex = lineBitIndex % 8;
+
+                    switch (colorBit)
+                    {
+                        case BitmapColorBit.Bit1:
+                            writeImageSpan[writeByteIndex] |= (byte)(palettIndex << (7 - writeBitIndex));
+                            lineBitIndex += 1;
+                            break;
+                        case BitmapColorBit.Bit4:
+                            writeImageSpan[writeByteIndex] |= (byte)(palettIndex << (3 - writeBitIndex));
+                            lineBitIndex += 4;
+                            break;
+                        case BitmapColorBit.Bit8:
+                            writeImageSpan[writeByteIndex] = (byte)(palettIndex);
+                            lineBitIndex += 8;
+                            break;
+                        case BitmapColorBit.Bit24:
+                            lineBitIndex += 24;
+                            break;
+                        case BitmapColorBit.Bit32:
+                            lineBitIndex += 32;
+                            break;
+                    }
+                }
+            }
+            // Data
+            var fileHeaderSpan = ToSpan(ref fileHeader);
+            var infoHeaderSpan = ToSpan(ref infoHeader);
+            var paletteDataSpan = CollectionsMarshal.AsSpan(paletteList);
+            var paletteByteSpan = MemoryMarshal.Cast<BitmapPaletteData, byte>(paletteDataSpan);
+
+            fileHeader.OffBits = (uint)fileHeaderSpan.Length + (uint)infoHeaderSpan.Length + (uint)paletteByteSpan.Length;
+            fileHeader.Size = fileHeader.OffBits + (uint)writeImageSpan.Length;
+            infoHeader.SizeImage = (uint)writeImageSpan.Length;
+            infoHeader.ClrUsed = (uint)paletteList.Count;
+            infoHeader.BitCount = (ushort)colorBit;
+            infoHeader.Compression = (uint)compression;
+
+            // Save
+            DeleteFile(path);
+            using var fileStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite, 4096, true);
+            fileStream.Write(fileHeaderSpan);
+            fileStream.Write(infoHeaderSpan);
+            fileStream.Write(paletteByteSpan);
+            fileStream.Write(writeImageSpan);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(writeImage);
+        }
+
     }
 
     public void SaveBitFieldsImage(string path, BitmapColorBit colorBit, int redMask, int greenMask, int blueMask)
