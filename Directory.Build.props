@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <Authors>EX-EXE</Authors>
+    <Owners>EX-EXE</Owners>
+    <PackageProjectUrl>https://github.com/EX-EXE/BitmapWriter</PackageProjectUrl>
+    <RepositoryUrl>$(PackageProjectUrl)</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Generates a bitmap image file.</Description>
+  </PropertyGroup>
+</Project>
