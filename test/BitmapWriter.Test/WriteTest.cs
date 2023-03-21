@@ -16,7 +16,8 @@ namespace BitmapWriter.Test
                 .GetCustomAttributes(typeof(System.Runtime.Versioning.TargetFrameworkAttribute), false)
                 .Select(x => x as System.Runtime.Versioning.TargetFrameworkAttribute)
                 .Select(x => x != null ? x.FrameworkDisplayName : "Unknown")
-                .First();
+                .First()
+                .Replace(".","_").Replace(" ","_");
 #pragma warning restore CS8601 // Possible null reference assignment.
         }
 
