@@ -13,11 +13,19 @@ public class BitmapWriter : IDisposable
     private BitmapInfoHeader infoHeader = new BitmapInfoHeader();
     private byte[] bufferImage = Array.Empty<byte>();
 
-    private static void DeleteExistsFile(string path)
+    private static void DeleteFile(string path)
     {
         if (System.IO.File.Exists(path))
         {
             System.IO.File.Delete(path);
+        }
+    }
+    private static void CreateDirectory(string path)
+    {
+        var parentDir = System.IO.Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(parentDir) && !System.IO.Directory.Exists(parentDir))
+        {
+            System.IO.Directory.CreateDirectory(parentDir);
         }
     }
 
@@ -103,7 +111,7 @@ public class BitmapWriter : IDisposable
         var srcImageSpan = bufferImage.AsSpan();
 
         var srcImageWidthSize = infoHeader.Width * 3;
-        var dstPaddingWidthSize = 4 - srcImageWidthSize % 4;
+        var dstPaddingWidthSize = (srcImageWidthSize % 4 == 0) ? 0 : 4 - srcImageWidthSize % 4;
         var dstImageTotalSize = (srcImageWidthSize + dstPaddingWidthSize) * (uint)infoHeader.Height;
 
         fileHeader.Size = (uint)fileHeaderSpan.Length + (uint)infoHeaderSpan.Length + (uint)dstImageTotalSize;
@@ -113,7 +121,8 @@ public class BitmapWriter : IDisposable
         infoHeader.Compression = (uint)BitmapCompression.Rgb;
 
         // Save
-        DeleteExistsFile(path);
+        DeleteFile(path);
+        CreateDirectory(path);
         using var fileStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite, 4096, true);
         fileStream.Write(fileHeaderSpan);
         fileStream.Write(infoHeaderSpan);
