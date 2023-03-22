@@ -201,6 +201,7 @@ public class BitmapWriter : IDisposable
 
         // Save
         DeleteFile(path);
+        CreateDirectory(path);
         using var fileStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite, 4096, true);
         fileStream.Write(fileHeaderSpan);
         fileStream.Write(infoHeaderSpan);
